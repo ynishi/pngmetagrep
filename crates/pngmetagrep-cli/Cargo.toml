@@ -1,7 +1,11 @@
 [package]
 name = "pngmetagrep"
-version = "0.1.0"
-edition = "2021"
+description = "PNG tEXt metadata → NDJSON CLI — grep your image metadata"
+version.workspace = true
+edition.workspace = true
+authors.workspace = true
+license.workspace = true
+repository.workspace = true
 
 [[bin]]
 name = "pngmetagrep"

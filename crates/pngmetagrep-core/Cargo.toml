@@ -1,7 +1,11 @@
 [package]
 name = "pngmetagrep-core"
-version = "0.1.0"
-edition = "2021"
+description = "PNG tEXt chunk extraction library — no image decoding, std-based binary reader"
+version.workspace = true
+edition.workspace = true
+authors.workspace = true
+license.workspace = true
+repository.workspace = true
 
 [dependencies]
 serde_json = "1"
