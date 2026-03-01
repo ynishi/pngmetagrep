@@ -3,17 +3,21 @@ name = "pngmetagrep"
 description = "PNG tEXt metadata → NDJSON CLI — grep your image metadata"
 version.workspace = true
 edition.workspace = true
+rust-version.workspace = true
 authors.workspace = true
 license.workspace = true
 repository.workspace = true
+homepage.workspace = true
 readme.workspace = true
+keywords = ["png", "metadata", "grep", "ndjson", "cli"]
+categories = ["command-line-utilities", "multimedia::images"]
 
 [[bin]]
 name = "pngmetagrep"
 path = "src/main.rs"
 
 [dependencies]
-pngmetagrep-core = { path = "../pngmetagrep-core" }
+pngmetagrep-core = { version = "0.1.0", path = "../pngmetagrep-core" }
 clap = { version = "4", features = ["derive"] }
 rayon = "1"
 regex = "1"

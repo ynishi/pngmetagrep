@@ -3,10 +3,14 @@ name = "pngmetagrep-core"
 description = "PNG tEXt chunk extraction library — no image decoding, std-based binary reader"
 version.workspace = true
 edition.workspace = true
+rust-version.workspace = true
 authors.workspace = true
 license.workspace = true
 repository.workspace = true
+homepage.workspace = true
 readme.workspace = true
+keywords = ["png", "metadata", "text-chunk", "parser", "ndjson"]
+categories = ["multimedia::images", "parser-implementations"]
 
 [dependencies]
 serde_json = "1"
