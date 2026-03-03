@@ -12,3 +12,8 @@ repository = "https://github.com/ynishi/pngmetagrep"
 homepage = "https://github.com/ynishi/pngmetagrep"
 readme = "README.md"
 description = "PNG tEXt metadata extractor — NDJSON output for jq pipelines"
+
+# The profile that 'dist' will build with
+[profile.dist]
+inherits = "release"
+lto = "thin"
