@@ -8,10 +8,10 @@ use walkdir::WalkDir;
 #[derive(Parser)]
 #[command(name = "pngmetagrep", about = "PNG tEXt metadata → NDJSON", version)]
 struct Cli {
-    /// Directory or file to scan.
-    path: PathBuf,
+    /// Directories or files to scan (default: current directory).
+    paths: Vec<PathBuf>,
 
-    /// tEXt chunk keyword to extract (repeatable, default: vdsl).
+    /// tEXt chunk keyword to extract (repeatable, default: all chunks).
     #[arg(long = "chunk")]
     chunks: Vec<String>,
 
@@ -32,33 +32,34 @@ struct Cli {
     threads: Option<usize>,
 }
 
-fn collect_pngs(root: &PathBuf) -> Vec<PathBuf> {
-    if root.is_file() {
-        return vec![root.clone()];
+fn collect_pngs(roots: &[PathBuf]) -> Vec<PathBuf> {
+    let mut files = Vec::new();
+    for root in roots {
+        if root.is_file() {
+            files.push(root.clone());
+            continue;
+        }
+        files.extend(
+            WalkDir::new(root)
+                .follow_links(true)
+                .into_iter()
+                .filter_map(|e| e.ok())
+                .filter(|e| {
+                    e.file_type().is_file()
+                        && e.path()
+                            .extension()
+                            .is_some_and(|ext| ext.eq_ignore_ascii_case("png"))
+                })
+                .map(|e| e.into_path()),
+        );
     }
-
-    WalkDir::new(root)
-        .follow_links(true)
-        .into_iter()
-        .filter_map(|e| e.ok())
-        .filter(|e| {
-            e.file_type().is_file()
-                && e.path()
-                    .extension()
-                    .is_some_and(|ext| ext.eq_ignore_ascii_case("png"))
-        })
-        .map(|e| e.into_path())
-        .collect()
+    files
 }
 
 fn main() {
     let cli = Cli::parse();
 
-    let keys: Vec<String> = if cli.chunks.is_empty() {
-        vec!["vdsl".into()]
-    } else {
-        cli.chunks
-    };
+    let keys: Vec<String> = cli.chunks;
 
     if let Some(n) = cli.threads {
         rayon::ThreadPoolBuilder::new()
@@ -77,12 +78,25 @@ fn main() {
             })
     });
 
-    let files = collect_pngs(&cli.path);
+    let paths = if cli.paths.is_empty() {
+        vec![PathBuf::from(".")]
+    } else {
+        cli.paths
+    };
+
+    let files = collect_pngs(&paths);
 
     let results: Vec<String> = files
         .par_iter()
         .filter_map(|path| {
-            let meta = pngmetagrep_core::extract(path, &keys).ok()??;
+            let meta = match pngmetagrep_core::extract(path, &keys) {
+                Ok(Some(m)) => m,
+                Ok(None) => return None,
+                Err(e) => {
+                    eprintln!("pngmetagrep: {}: {e}", path.display());
+                    return None;
+                }
+            };
 
             if cli.files_only {
                 if let Some(ref re) = re {
