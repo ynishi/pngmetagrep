@@ -12,6 +12,16 @@ Extracts `tEXt` chunks from PNG files and outputs one JSON object per line (NDJS
 
 ## Install
 
+### Pre-built binary (recommended)
+
+```bash
+curl --proto '=https' --tlsv1.2 -LsSf https://github.com/ynishi/pngmetagrep/releases/latest/download/pngmetagrep-installer.sh | sh
+```
+
+Platforms: `x86_64-linux`, `aarch64-linux`, `x86_64-macos`, `aarch64-macos`
+
+### From source
+
 ```bash
 cargo install pngmetagrep
 ```
@@ -19,7 +29,7 @@ cargo install pngmetagrep
 ## Usage
 
 ```bash
-# Extract vdsl chunks (default) from all PNGs under a directory
+# Extract all tEXt chunks from PNGs under a directory
 pngmetagrep ./images
 
 # Specify chunk keywords (repeatable)
@@ -45,7 +55,7 @@ pngmetagrep ./images | jq 'select(.seed == 42)'
 
 | Flag | Description |
 |---|---|
-| `--chunk <KEY>` | tEXt keyword to extract (repeatable, default: `vdsl`) |
+| `--chunk <KEY>` | tEXt keyword to extract (repeatable, default: all) |
 | `-e <REGEX>` | Regex filter applied to serialized JSON output |
 | `-i` | Case-insensitive matching for `-e` |
 | `-l` | Print matching file paths only (no JSON) |
@@ -71,6 +81,14 @@ Multiple chunks or non-object values — nested by keyword:
 |---|---|
 | `pngmetagrep-core` | PNG tEXt chunk extraction library (std only, no image decoding) |
 | `pngmetagrep` (CLI) | Parallel CLI built on clap + rayon + walkdir |
+
+## Release
+
+Pre-built binaries are distributed via [cargo-dist](https://opensource.axo.dev/cargo-dist/). Tag push (`v*.*.*`) triggers GitHub Actions to build and publish to [Releases](https://github.com/ynishi/pngmetagrep/releases).
+
+```bash
+cargo release patch --execute
+```
 
 ## License
 
