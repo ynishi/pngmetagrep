@@ -13,6 +13,11 @@ homepage = "https://github.com/ynishi/pngmetagrep"
 readme = "README.md"
 description = "PNG tEXt metadata extractor — NDJSON output for jq pipelines"
 
+# cargo-release: unified version tag for cargo-dist CI trigger
+[workspace.metadata.release]
+shared-version = true
+tag-name = "v{{version}}"
+
 # The profile that 'dist' will build with
 [profile.dist]
 inherits = "release"
