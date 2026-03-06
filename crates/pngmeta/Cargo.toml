@@ -13,3 +13,4 @@ keywords = ["png", "metadata", "text-chunk", "reader", "writer"]
 categories = ["multimedia::images", "parser-implementations"]
 
 [dependencies]
+memchr = "2"

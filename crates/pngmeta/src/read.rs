@@ -8,6 +8,8 @@ use std::fs::File;
 use std::io::{self, BufReader, Read, Seek, SeekFrom};
 use std::path::Path;
 
+use memchr::memmem;
+
 use crate::PNG_SIGNATURE;
 
 /// Extract all tEXt chunks from a PNG file.
@@ -48,6 +50,48 @@ pub fn read_text_chunks(path: &Path) -> io::Result<BTreeMap<String, String>> {
     }
 
     Ok(chunks)
+}
+
+/// Search tEXt chunk data for a byte pattern without decoding.
+///
+/// Scans each tEXt chunk's raw bytes (keyword + null + text) using
+/// SIMD-accelerated `memmem`. Returns `true` on first match (early exit).
+///
+/// This is significantly faster than [`read_text_chunks`] + string search
+/// when you only need a contains check, because it skips UTF-8 decoding,
+/// JSON parsing, and collection construction entirely.
+pub fn contains_in_text_chunks(path: &Path, needle: &[u8]) -> io::Result<bool> {
+    let file = File::open(path)?;
+    let mut reader = BufReader::new(file);
+
+    let mut sig = [0u8; 8];
+    reader.read_exact(&mut sig)?;
+    if sig != PNG_SIGNATURE {
+        return Err(io::Error::new(io::ErrorKind::InvalidData, "not a PNG file"));
+    }
+
+    let finder = memmem::Finder::new(needle);
+    let mut header = [0u8; 8];
+
+    while reader.read_exact(&mut header).is_ok() {
+        let length = u32::from_be_bytes([header[0], header[1], header[2], header[3]]);
+
+        if &header[4..8] == b"tEXt" {
+            let mut data = vec![0u8; length as usize];
+            reader.read_exact(&mut data)?;
+            reader.seek(SeekFrom::Current(4))?; // skip CRC
+
+            if finder.find(&data).is_some() {
+                return Ok(true);
+            }
+        } else if &header[4..8] == b"IEND" {
+            break;
+        } else {
+            reader.seek(SeekFrom::Current(i64::from(length) + 4))?;
+        }
+    }
+
+    Ok(false)
 }
 
 #[cfg(test)]
@@ -116,6 +160,54 @@ mod tests {
         let chunks = read_text_chunks(&path).unwrap();
         let keys: Vec<&String> = chunks.keys().collect();
         assert_eq!(keys, vec!["alpha", "middle", "zebra"]);
+        std::fs::remove_file(&path).ok();
+    }
+
+    // --- contains_in_text_chunks tests ---
+
+    #[test]
+    fn contains_finds_in_text_value() {
+        let path = write_test_png("pngmeta_contains_val.png", &[("vdsl", r#"{"seed":42}"#)]);
+        assert!(contains_in_text_chunks(&path, b"seed").unwrap());
+        std::fs::remove_file(&path).ok();
+    }
+
+    #[test]
+    fn contains_finds_in_keyword() {
+        let path = write_test_png("pngmeta_contains_kw.png", &[("workflow", "data")]);
+        assert!(contains_in_text_chunks(&path, b"workflow").unwrap());
+        std::fs::remove_file(&path).ok();
+    }
+
+    #[test]
+    fn contains_returns_false_when_absent() {
+        let path = write_test_png("pngmeta_contains_miss.png", &[("vdsl", r#"{"seed":1}"#)]);
+        assert!(!contains_in_text_chunks(&path, b"nonexistent").unwrap());
+        std::fs::remove_file(&path).ok();
+    }
+
+    #[test]
+    fn contains_returns_false_for_empty_png() {
+        let path = write_test_png("pngmeta_contains_empty.png", &[]);
+        assert!(!contains_in_text_chunks(&path, b"anything").unwrap());
+        std::fs::remove_file(&path).ok();
+    }
+
+    #[test]
+    fn contains_early_exits_on_first_match() {
+        let path = write_test_png(
+            "pngmeta_contains_early.png",
+            &[("a", "needle"), ("b", "needle"), ("c", "other")],
+        );
+        assert!(contains_in_text_chunks(&path, b"needle").unwrap());
+        std::fs::remove_file(&path).ok();
+    }
+
+    #[test]
+    fn contains_rejects_non_png() {
+        let path = std::env::temp_dir().join("pngmeta_contains_bad.txt");
+        std::fs::write(&path, b"not png").unwrap();
+        assert!(contains_in_text_chunks(&path, b"x").is_err());
         std::fs::remove_file(&path).ok();
     }
 }
