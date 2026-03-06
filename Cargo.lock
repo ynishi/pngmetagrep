@@ -385,10 +385,8 @@ version = "0.1.3"
 dependencies = [
  "clap",
  "libc",
- "pngmeta",
  "pngmetagrep-core",
  "rayon",
- "regex",
  "serde_json",
  "walkdir",
 ]
@@ -398,6 +396,7 @@ name = "pngmetagrep-core"
 version = "0.1.3"
 dependencies = [
  "pngmeta",
+ "regex",
  "serde_json",
 ]
 

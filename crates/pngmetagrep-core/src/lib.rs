@@ -4,6 +4,9 @@
 //! VDSL image generation platform. Also works for ComfyUI's `"prompt"`
 //! and `"workflow"` chunks or any arbitrary tEXt keyword.
 
+mod find;
+
+pub use find::{FindOptions, Matcher};
 pub use pngmeta::read_text_chunks;
 
 use serde_json::Value;
