@@ -9,7 +9,7 @@ mod write;
 #[doc(hidden)]
 pub mod test_util;
 
-pub use read::{contains_in_text_chunks, read_text_chunks};
+pub use read::{contains_in_text_chunks, read_text_chunks, scan_text_chunks};
 pub use write::write_text_chunk;
 
 /// PNG file signature (8 bytes).

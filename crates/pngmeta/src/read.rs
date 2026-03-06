@@ -12,6 +12,50 @@ use memchr::memmem;
 
 use crate::PNG_SIGNATURE;
 
+/// Scan tEXt chunks with a caller-supplied predicate on raw bytes.
+///
+/// Iterates over tEXt chunks in the PNG file, passing each chunk's raw
+/// data (keyword + null + text) to `predicate`. Returns `Ok(true)` as
+/// soon as any call returns `true` (early exit).
+///
+/// This is the low-level building block for binary-level searches.
+/// No UTF-8 decoding, JSON parsing, or collection construction occurs.
+pub fn scan_text_chunks<F>(path: &Path, mut predicate: F) -> io::Result<bool>
+where
+    F: FnMut(&[u8]) -> bool,
+{
+    let file = File::open(path)?;
+    let mut reader = BufReader::new(file);
+
+    let mut sig = [0u8; 8];
+    reader.read_exact(&mut sig)?;
+    if sig != PNG_SIGNATURE {
+        return Err(io::Error::new(io::ErrorKind::InvalidData, "not a PNG file"));
+    }
+
+    let mut header = [0u8; 8];
+
+    while reader.read_exact(&mut header).is_ok() {
+        let length = u32::from_be_bytes([header[0], header[1], header[2], header[3]]);
+
+        if &header[4..8] == b"tEXt" {
+            let mut data = vec![0u8; length as usize];
+            reader.read_exact(&mut data)?;
+            reader.seek(SeekFrom::Current(4))?; // skip CRC
+
+            if predicate(&data) {
+                return Ok(true);
+            }
+        } else if &header[4..8] == b"IEND" {
+            break;
+        } else {
+            reader.seek(SeekFrom::Current(i64::from(length) + 4))?;
+        }
+    }
+
+    Ok(false)
+}
+
 /// Extract all tEXt chunks from a PNG file.
 ///
 /// Returns keyword → text pairs in sorted order. Reads chunk headers
@@ -54,44 +98,12 @@ pub fn read_text_chunks(path: &Path) -> io::Result<BTreeMap<String, String>> {
 
 /// Search tEXt chunk data for a byte pattern without decoding.
 ///
-/// Scans each tEXt chunk's raw bytes (keyword + null + text) using
-/// SIMD-accelerated `memmem`. Returns `true` on first match (early exit).
-///
-/// This is significantly faster than [`read_text_chunks`] + string search
-/// when you only need a contains check, because it skips UTF-8 decoding,
-/// JSON parsing, and collection construction entirely.
+/// SIMD-accelerated (`memmem`) search over each chunk's raw bytes.
+/// Returns `true` on first match (early exit). Wrapper around
+/// [`scan_text_chunks`].
 pub fn contains_in_text_chunks(path: &Path, needle: &[u8]) -> io::Result<bool> {
-    let file = File::open(path)?;
-    let mut reader = BufReader::new(file);
-
-    let mut sig = [0u8; 8];
-    reader.read_exact(&mut sig)?;
-    if sig != PNG_SIGNATURE {
-        return Err(io::Error::new(io::ErrorKind::InvalidData, "not a PNG file"));
-    }
-
     let finder = memmem::Finder::new(needle);
-    let mut header = [0u8; 8];
-
-    while reader.read_exact(&mut header).is_ok() {
-        let length = u32::from_be_bytes([header[0], header[1], header[2], header[3]]);
-
-        if &header[4..8] == b"tEXt" {
-            let mut data = vec![0u8; length as usize];
-            reader.read_exact(&mut data)?;
-            reader.seek(SeekFrom::Current(4))?; // skip CRC
-
-            if finder.find(&data).is_some() {
-                return Ok(true);
-            }
-        } else if &header[4..8] == b"IEND" {
-            break;
-        } else {
-            reader.seek(SeekFrom::Current(i64::from(length) + 4))?;
-        }
-    }
-
-    Ok(false)
+    scan_text_chunks(path, |data| finder.find(data).is_some())
 }
 
 #[cfg(test)]
@@ -105,6 +117,8 @@ mod tests {
         std::fs::write(&path, make_test_png(chunks)).unwrap();
         path
     }
+
+    // --- read_text_chunks tests ---
 
     #[test]
     fn rejects_non_png() {
@@ -160,6 +174,51 @@ mod tests {
         let chunks = read_text_chunks(&path).unwrap();
         let keys: Vec<&String> = chunks.keys().collect();
         assert_eq!(keys, vec!["alpha", "middle", "zebra"]);
+        std::fs::remove_file(&path).ok();
+    }
+
+    // --- scan_text_chunks tests ---
+
+    #[test]
+    fn scan_returns_true_on_predicate_match() {
+        let path = write_test_png("pngmeta_scan_match.png", &[("key", "value")]);
+        let result =
+            scan_text_chunks(&path, |data| data.windows(5).any(|w| w == b"value")).unwrap();
+        assert!(result);
+        std::fs::remove_file(&path).ok();
+    }
+
+    #[test]
+    fn scan_returns_false_when_no_match() {
+        let path = write_test_png("pngmeta_scan_nomatch.png", &[("key", "value")]);
+        let result =
+            scan_text_chunks(&path, |data| data.windows(6).any(|w| w == b"absent")).unwrap();
+        assert!(!result);
+        std::fs::remove_file(&path).ok();
+    }
+
+    #[test]
+    fn scan_early_exits() {
+        let path = write_test_png(
+            "pngmeta_scan_early.png",
+            &[("a", "hit"), ("b", "hit"), ("c", "miss")],
+        );
+        let mut call_count = 0usize;
+        let result = scan_text_chunks(&path, |data| {
+            call_count += 1;
+            data.windows(3).any(|w| w == b"hit")
+        })
+        .unwrap();
+        assert!(result);
+        assert_eq!(call_count, 1);
+        std::fs::remove_file(&path).ok();
+    }
+
+    #[test]
+    fn scan_rejects_non_png() {
+        let path = std::env::temp_dir().join("pngmeta_scan_bad.txt");
+        std::fs::write(&path, b"not png").unwrap();
+        assert!(scan_text_chunks(&path, |_| true).is_err());
         std::fs::remove_file(&path).ok();
     }
 

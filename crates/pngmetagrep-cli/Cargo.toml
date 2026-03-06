@@ -17,6 +17,7 @@ name = "pngmetagrep"
 path = "src/main.rs"
 
 [dependencies]
+pngmeta = { version = "0.1.3", path = "../pngmeta" }
 pngmetagrep-core = { version = "0.1.3", path = "../pngmetagrep-core" }
 clap = { version = "4", features = ["derive"] }
 rayon = "1"
