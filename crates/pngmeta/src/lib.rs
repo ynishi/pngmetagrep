@@ -6,7 +6,7 @@
 mod read;
 mod write;
 
-#[doc(hidden)]
+#[cfg(any(test, feature = "test-util"))]
 pub mod test_util;
 
 pub use read::{contains_in_text_chunks, read_text_chunks, scan_text_chunks};
