@@ -371,7 +371,7 @@ dependencies = [
 
 [[package]]
 name = "pngmeta"
-version = "0.1.3"
+version = "0.1.4"
 dependencies = [
  "criterion",
  "memchr",
@@ -381,7 +381,7 @@ dependencies = [
 
 [[package]]
 name = "pngmetagrep"
-version = "0.1.3"
+version = "0.1.4"
 dependencies = [
  "clap",
  "libc",
@@ -393,7 +393,7 @@ dependencies = [
 
 [[package]]
 name = "pngmetagrep-core"
-version = "0.1.3"
+version = "0.1.4"
 dependencies = [
  "pngmeta",
  "regex",
