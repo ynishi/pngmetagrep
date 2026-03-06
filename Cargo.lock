@@ -384,6 +384,7 @@ name = "pngmetagrep"
 version = "0.1.3"
 dependencies = [
  "clap",
+ "libc",
  "pngmeta",
  "pngmetagrep-core",
  "rayon",

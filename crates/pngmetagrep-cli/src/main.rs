@@ -4,6 +4,8 @@ use regex::bytes::RegexBuilder as BytesRegexBuilder;
 use regex::RegexBuilder;
 use std::io::{self, BufWriter, Write};
 use std::path::{Path, PathBuf};
+use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
+use std::sync::mpsc;
 use walkdir::WalkDir;
 
 #[derive(Parser)]
@@ -27,6 +29,14 @@ struct Cli {
     /// Print matching file paths only (no JSON).
     #[arg(short = 'l')]
     files_only: bool,
+
+    /// Stop after N matches.
+    #[arg(short = 'n', long = "limit")]
+    limit: Option<usize>,
+
+    /// Print match count only.
+    #[arg(short = 'c', long = "count")]
+    count: bool,
 
     /// Number of parallel threads (default: CPU count).
     #[arg(short = 'j')]
@@ -131,10 +141,65 @@ fn collect_pngs(roots: &[PathBuf]) -> Vec<PathBuf> {
     files
 }
 
+/// Process a single file and return the output line (if matched).
+fn process_file(
+    path: &Path,
+    keys: &[String],
+    strategy: &MatchStrategy,
+    files_only: bool,
+) -> Option<String> {
+    // Fast path: binary pre-filter (Level 1 & 2)
+    if let Some(matched) = bin_matches(path, strategy) {
+        if !matched {
+            return None;
+        }
+
+        // files_only + bin match → no need for extract/serde at all
+        if files_only {
+            return Some(path.display().to_string());
+        }
+    }
+
+    // Need extract for JSON output or JsonRegex matching
+    let meta = match pngmetagrep_core::extract(path, keys) {
+        Ok(Some(m)) => m,
+        Ok(None) => return None,
+        Err(e) => {
+            eprintln!("pngmetagrep: {}: {e}", path.display());
+            return None;
+        }
+    };
+
+    // Level 3 (JsonRegex): serde + regex match
+    if let MatchStrategy::JsonRegex(ref re) = *strategy {
+        let json = serde_json::to_string(&meta.to_json_value()).ok()?;
+        if !re.is_match(&json) {
+            return None;
+        }
+        if files_only {
+            return Some(meta.path);
+        }
+        return Some(json);
+    }
+
+    // Level 1 & 2 already matched — just produce JSON output
+    let json = serde_json::to_string(&meta.to_json_value()).ok()?;
+    Some(json)
+}
+
 fn main() {
+    // Reset SIGPIPE to default so BrokenPipe is delivered properly
+    #[cfg(unix)]
+    unsafe {
+        libc::signal(libc::SIGPIPE, libc::SIG_DFL);
+    }
+
     let cli = Cli::parse();
 
     let keys: Vec<String> = cli.chunks.clone();
+    let files_only = cli.files_only;
+    let count_only = cli.count;
+    let limit = cli.limit;
 
     if let Some(n) = cli.threads {
         rayon::ThreadPoolBuilder::new()
@@ -153,52 +218,60 @@ fn main() {
 
     let files = collect_pngs(&paths);
 
-    let results: Vec<String> = files
-        .par_iter()
-        .filter_map(|path| {
-            // Fast path: binary pre-filter (Level 1 & 2)
-            if let Some(matched) = bin_matches(path, &strategy) {
-                if !matched {
-                    return None;
-                }
+    // Shared stop flag: set when limit reached or pipe broken
+    let stop = AtomicBool::new(false);
+    let match_count = AtomicUsize::new(0);
 
-                // files_only + bin match → no need for extract/serde at all
-                if cli.files_only {
-                    return Some(path.display().to_string());
+    // Bounded channel: backpressure when consumer is slow
+    let (tx, rx) = mpsc::sync_channel::<String>(64);
+
+    // Consumer thread: write to stdout
+    let consumer = std::thread::spawn(move || {
+        let stdout = io::stdout().lock();
+        let mut writer = BufWriter::new(stdout);
+
+        if count_only {
+            // Count mode: just drain and count
+            let mut n = 0usize;
+            for _line in rx {
+                n += 1;
+            }
+            let _ = writeln!(writer, "{n}");
+            return;
+        }
+
+        for line in rx {
+            if writeln!(writer, "{line}").is_err() {
+                // BrokenPipe — consumer done
+                break;
+            }
+        }
+    });
+
+    // Producer: parallel scan, streaming results via channel
+    files.par_iter().for_each(|path| {
+        if stop.load(Ordering::Relaxed) {
+            return;
+        }
+
+        if let Some(line) = process_file(path, &keys, &strategy, files_only) {
+            // Check limit
+            if let Some(max) = limit {
+                let prev = match_count.fetch_add(1, Ordering::Relaxed);
+                if prev >= max {
+                    stop.store(true, Ordering::Relaxed);
+                    return;
                 }
             }
 
-            // Need extract for JSON output or JsonRegex matching
-            let meta = match pngmetagrep_core::extract(path, &keys) {
-                Ok(Some(m)) => m,
-                Ok(None) => return None,
-                Err(e) => {
-                    eprintln!("pngmetagrep: {}: {e}", path.display());
-                    return None;
-                }
-            };
-
-            // Level 3 (JsonRegex): serde + regex match
-            if let MatchStrategy::JsonRegex(ref re) = strategy {
-                let json = serde_json::to_string(&meta.to_json_value()).ok()?;
-                if !re.is_match(&json) {
-                    return None;
-                }
-                if cli.files_only {
-                    return Some(meta.path);
-                }
-                return Some(json);
+            // Send may fail if consumer has stopped (BrokenPipe)
+            if tx.send(line).is_err() {
+                stop.store(true, Ordering::Relaxed);
             }
+        }
+    });
 
-            // Level 1 & 2 already matched — just produce JSON output
-            let json = serde_json::to_string(&meta.to_json_value()).ok()?;
-            Some(json)
-        })
-        .collect();
-
-    let stdout = io::stdout().lock();
-    let mut writer = BufWriter::new(stdout);
-    for line in &results {
-        let _ = writeln!(writer, "{line}");
-    }
+    // Drop sender so consumer thread can finish
+    drop(tx);
+    let _ = consumer.join();
 }
