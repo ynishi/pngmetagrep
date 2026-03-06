@@ -8,7 +8,7 @@ use std::fs::File;
 use std::io::{self, BufReader, Read, Seek, SeekFrom};
 use std::path::Path;
 
-const PNG_SIGNATURE: [u8; 8] = [137, 80, 78, 71, 13, 10, 26, 10];
+use crate::PNG_SIGNATURE;
 
 /// Extract all tEXt chunks from a PNG file.
 ///
@@ -50,40 +50,10 @@ pub fn read_text_chunks(path: &Path) -> io::Result<BTreeMap<String, String>> {
     Ok(chunks)
 }
 
-/// Build a minimal valid PNG with the given tEXt chunks (test helper).
-#[cfg(test)]
-pub(crate) fn make_test_png(text_chunks: &[(&str, &str)]) -> Vec<u8> {
-    let mut buf = Vec::new();
-    buf.extend_from_slice(&PNG_SIGNATURE);
-
-    // IHDR: 1×1 8-bit grayscale
-    let ihdr: [u8; 13] = [0, 0, 0, 1, 0, 0, 0, 1, 8, 0, 0, 0, 0];
-    buf.extend_from_slice(&13u32.to_be_bytes());
-    buf.extend_from_slice(b"IHDR");
-    buf.extend_from_slice(&ihdr);
-    buf.extend_from_slice(&[0; 4]); // CRC (not validated by reader)
-
-    for (kw, txt) in text_chunks {
-        let len = kw.len() + 1 + txt.len();
-        buf.extend_from_slice(&(len as u32).to_be_bytes());
-        buf.extend_from_slice(b"tEXt");
-        buf.extend_from_slice(kw.as_bytes());
-        buf.push(0);
-        buf.extend_from_slice(txt.as_bytes());
-        buf.extend_from_slice(&[0; 4]); // CRC
-    }
-
-    // IEND
-    buf.extend_from_slice(&0u32.to_be_bytes());
-    buf.extend_from_slice(b"IEND");
-    buf.extend_from_slice(&[0; 4]); // CRC
-
-    buf
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::test_util::make_test_png;
     use std::path::PathBuf;
 
     fn write_test_png(name: &str, chunks: &[(&str, &str)]) -> PathBuf {
@@ -94,7 +64,7 @@ mod tests {
 
     #[test]
     fn rejects_non_png() {
-        let path = std::env::temp_dir().join("pmg_test_not_a_png.txt");
+        let path = std::env::temp_dir().join("pngmeta_test_not_a_png.txt");
         std::fs::write(&path, b"hello world").unwrap();
         let result = read_text_chunks(&path);
         assert!(result.is_err());
@@ -109,7 +79,7 @@ mod tests {
 
     #[test]
     fn extracts_single_text_chunk() {
-        let path = write_test_png("pmg_test_single.png", &[("vdsl", r#"{"seed":42}"#)]);
+        let path = write_test_png("pngmeta_test_single.png", &[("vdsl", r#"{"seed":42}"#)]);
         let chunks = read_text_chunks(&path).unwrap();
         assert_eq!(chunks.len(), 1);
         assert_eq!(chunks["vdsl"], r#"{"seed":42}"#);
@@ -119,7 +89,7 @@ mod tests {
     #[test]
     fn extracts_multiple_text_chunks() {
         let path = write_test_png(
-            "pmg_test_multi.png",
+            "pngmeta_test_multi.png",
             &[("prompt", "hello"), ("workflow", r#"{"nodes":[]}"#)],
         );
         let chunks = read_text_chunks(&path).unwrap();
@@ -131,7 +101,7 @@ mod tests {
 
     #[test]
     fn returns_empty_for_png_without_text() {
-        let path = write_test_png("pmg_test_notext.png", &[]);
+        let path = write_test_png("pngmeta_test_notext.png", &[]);
         let chunks = read_text_chunks(&path).unwrap();
         assert!(chunks.is_empty());
         std::fs::remove_file(&path).ok();
@@ -140,7 +110,7 @@ mod tests {
     #[test]
     fn keys_are_sorted() {
         let path = write_test_png(
-            "pmg_test_sorted.png",
+            "pngmeta_test_sorted.png",
             &[("zebra", "z"), ("alpha", "a"), ("middle", "m")],
         );
         let chunks = read_text_chunks(&path).unwrap();

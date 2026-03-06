@@ -4,9 +4,7 @@
 //! VDSL image generation platform. Also works for ComfyUI's `"prompt"`
 //! and `"workflow"` chunks or any arbitrary tEXt keyword.
 
-mod chunk;
-
-pub use chunk::read_text_chunks;
+pub use pngmeta::read_text_chunks;
 
 use serde_json::Value;
 use std::io;
@@ -57,7 +55,7 @@ impl PngMeta {
 /// as a JSON string. Files without any matching chunks return
 /// `Ok(None)`.
 pub fn extract(path: &Path, keys: &[String]) -> io::Result<Option<PngMeta>> {
-    let text_chunks = read_text_chunks(path)?;
+    let text_chunks = pngmeta::read_text_chunks(path)?;
 
     let mut found = Vec::new();
 
@@ -93,7 +91,7 @@ mod tests {
 
     fn write_test_png(name: &str, chunks: &[(&str, &str)]) -> std::path::PathBuf {
         let path = std::env::temp_dir().join(name);
-        std::fs::write(&path, chunk::make_test_png(chunks)).unwrap();
+        std::fs::write(&path, pngmeta::test_util::make_test_png(chunks)).unwrap();
         path
     }
 
